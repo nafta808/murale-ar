@@ -1,4 +1,4 @@
-/* Murale AR v4 — il posto stesso è il riferimento.
+/* Murale AR v6 — il posto stesso è il riferimento.
    Cattura -> angoli sotto il mirino -> Studio (immagine/video, disegno, forme) -> Pubblica (QR) -> Guarda/Esplora (più opere insieme). */
 'use strict';
 const $ = id => document.getElementById(id);
@@ -596,12 +596,15 @@ function sizeCanvas() {
 }
 addEventListener('resize', () => { if (XRS.running) sizeCanvas(); });
 function setChip(t, ok) { $('chipT').textContent = t; $('chip').classList.toggle('ok', !!ok); }
-/* Blocco del quadro: il motore vede l'impronta del punto (da una qualsiasi angolazione) e stima dove sta l'area.
-   Raccolgo le prime stime, quando sono coerenti fisso l'opera nello spazio e da lì non la muovo più:
-   la tiene ferma il tracciamento del movimento. La sposto solo se molte nuove stime di fila, coerenti tra loro,
-   dicono che è lontana dal posto (per esempio dopo una deriva). */
-const LOCK = { need: 8, spread: .04, far: .12, farNeed: 10 };
-const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Vector3();
+/* Aggancio v6 — fusione continua tra riconoscimento del punto e tracciamento del movimento.
+   - Quando il punto è visibile (da qualsiasi angolazione) l'opera viene corretta subito, in modo morbido: niente "zona morta".
+   - Quando non è visibile, la tiene ferma il tracciamento del movimento (SLAM).
+   - Le angolazioni extra vengono calibrate al volo sulla frontale: niente salti passando da un'impronta all'altra.
+   - Una stima isolata e lontana viene scartata; se 3 stime di fila confermano un nuovo posto, l'opera ci scivola in un attimo.
+   - Il movimento a schermo è una molla smorzata a ogni fotogramma: fluido anche se le stime arrivano a scatti. */
+const LOCK = { need: 4, spread: .05, near: .22, follow: .35, confirm: 3, confirmSpread: .07, tau: .085, tauSnap: .05, learnWin: 1800, learnMax: .35, learnN: 6 };
+const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _qi = new THREE.Quaternion();
+const SLAM = { ok: true, reason: '', badAt: 0, okAt: 0 };
 function areaPose(d, area) {
   const p = new THREE.Vector3(d.position.x, d.position.y, d.position.z), q = new THREE.Quaternion(d.rotation.x, d.rotation.y, d.rotation.z, d.rotation.w).normalize();
   _v.set(area.cx, area.cy, .002).multiplyScalar(d.scale).applyQuaternion(q);
@@ -609,32 +612,81 @@ function areaPose(d, area) {
 }
 function meanPose(list) {
   const p = new THREE.Vector3(), q = list[0].q.clone(); let h = 0;
-  list.forEach((s, i) => { p.add(s.p); h += s.h; if (i) q.slerp(s.q, 1 / (i + 1)); });
+  list.forEach((s, i) => { p.add(s.p); h += s.h; if (i) { const sq = s.q.dot(q) < 0 ? s.q.clone().set(-s.q.x, -s.q.y, -s.q.z, -s.q.w) : s.q; q.slerp(sq, 1 / (i + 1)); } });
   return { p: p.divideScalar(list.length), q, h: h / list.length };
 }
-const spreadOf = (list, m) => Math.max(...list.map(s => s.p.distanceTo(m.p) / m.h + (1 - Math.abs(s.q.dot(m.q))) * 4));
+const devOf = (a, b) => a.p.distanceTo(b.p) / b.h + (1 - Math.abs(a.q.dot(b.q))) * 4 + Math.abs(a.h / b.h - 1) * .5;
+const spreadOf = (list, m) => Math.max(...list.map(s => devOf(s, m)));
+const clonePose = s => ({ p: s.p.clone(), q: s.q.clone(), h: s.h });
+// posizione dell'opera "vista dall'impronta": rel = differenza tra stima di questa impronta e opera vera, nel sistema locale dell'impronta
+function relOf(s, ref) { _qi.copy(s.q).invert(); return { p: ref.p.clone().sub(s.p).applyQuaternion(_qi).divideScalar(s.h), q: _qi.clone().multiply(ref.q), k: ref.h / s.h }; }
+function applyRel(s, r) { return { p: s.p.clone().add(r.p.clone().multiplyScalar(s.h).applyQuaternion(s.q)), q: s.q.clone().multiply(r.q).normalize(), h: s.h * r.k }; }
+function blendPose(a, b, k) { if (b.q.dot(a.q) < 0) b = { p: b.p, q: b.q.clone().set(-b.q.x, -b.q.y, -b.q.z, -b.q.w), h: b.h };
+  a.p.lerp(b.p, k); a.q.slerp(b.q, k); a.h += (b.h - a.h) * k; }
 function setPose(G, m) { G.position.copy(m.p); G.quaternion.copy(m.q); G.scale.setScalar(m.h); G.updateMatrixWorld(true); }
 function onImage(d) {
-  const T = XRS.tmap.get(d.name); if (!T) return; const A = T.A, G = A.group, s = areaPose(d, T.area);
+  const T = XRS.tmap.get(d.name); if (!T) return; const A = T.A, G = A.group, now = performance.now(), raw = areaPose(d, T.area);
+  const main = T.main; A.seen[d.name] = now;
   if (!IS_MOBILE) { // computer: niente tracciamento del movimento, l'opera segue l'immagine
-    if (!A.samples) setPose(G, s); else { G.position.lerp(s.p, .5); G.quaternion.slerp(s.q, .5); G.scale.setScalar(G.scale.x + (s.h - G.scale.x) * .5); G.updateMatrixWorld(true); }
-  } else if (!A.locked) {
-    A.buf.push(s); if (A.buf.length > 12) A.buf.shift();
-    const m = meanPose(A.buf); setPose(G, m);
-    if (A.buf.length >= LOCK.need && (spreadOf(A.buf, m) < LOCK.spread || A.samples >= 40)) { A.locked = true; A.buf = []; XRS.hooks.locked && XRS.hooks.locked(A); }
-    else if (A.buf.length >= 12) A.buf = A.buf.filter(x => x.p.distanceTo(m.p) / m.h < LOCK.spread * 2); // scarto le stime storte
-  } else {
-    const dev = s.p.distanceTo(G.position) / G.scale.x + (1 - Math.abs(s.q.dot(G.quaternion))) * 4;
-    if (dev < LOCK.far) { A.far = []; }
-    else { A.far.push(s); if (A.far.length >= LOCK.farNeed) { const m = meanPose(A.far);
-        if (spreadOf(A.far, m) < LOCK.spread * 1.5) { A.move = { from: { p: G.position.clone(), q: G.quaternion.clone(), h: G.scale.x }, to: m, t0: performance.now() }; }
-        A.far = []; } }
+    if (!A.samples) setPose(G, raw); else { G.position.lerp(raw.p, .5); G.quaternion.slerp(raw.q, .5); G.scale.setScalar(G.scale.x + (raw.h - G.scale.x) * .5); G.updateMatrixWorld(true); }
+    if (A.samples++ === 0) XRS.hooks.found && XRS.hooks.found(A); return;
   }
+  // 1. stima corretta con la calibrazione dell'impronta (le angolazioni extra si allineano alla frontale)
+  let s = raw; const off = A.off[d.name];
+  if (!main && off && off.n >= LOCK.learnN) s = applyRel(raw, off.r);
+  if (main) A.mainAt = now;
+  // 2. calibrazione al volo: un'impronta extra impara dove sta l'opera rispetto a sé, finché il riferimento è fresco e affidabile
+  if (!main && A.goal && SLAM.ok && now - A.mainAt < LOCK.learnWin && now - SLAM.badAt > 800 && !(off && off.n >= 20)) {
+    const r = relOf(raw, A.goal), mag = r.p.length() + (1 - Math.abs(r.q.w)) * 4 + Math.abs(r.k - 1) * .5;
+    if (mag < LOCK.learnMax) {
+      if (!off) A.off[d.name] = { r, n: 1 };
+      else { const k = 1 / (off.n + 1); off.r.p.lerp(r.p, k); if (r.q.dot(off.r.q) < 0) r.q.set(-r.q.x, -r.q.y, -r.q.z, -r.q.w); off.r.q.slerp(r.q, k); off.r.k += (r.k - off.r.k) * k; off.n++; }
+    }
+  }
+  A.hist.push({ s, t: now, main }); while (A.hist.length > 6 || (A.hist.length && now - A.hist[0].t > 500)) A.hist.shift();
   if (A.samples++ === 0) XRS.hooks.found && XRS.hooks.found(A);
+  // 3. primo aggancio: poche stime coerenti e l'opera si fissa
+  if (!A.locked) {
+    A.buf.push(s); if (A.buf.length > 10) A.buf.shift();
+    const m = meanPose(A.buf); if (!A.goal) { A.goal = clonePose(m); setPose(G, m); } else A.goal = m;
+    if (A.buf.length >= LOCK.need && (spreadOf(A.buf, m) < LOCK.spread || A.samples >= 24)) { A.locked = true; A.buf = []; XRS.hooks.locked && XRS.hooks.locked(A); }
+    else if (A.buf.length >= 8) A.buf = A.buf.filter(x => devOf(x, m) < LOCK.spread * 2);
+    return;
+  }
+  // 4. opera fissata: correzione continua
+  const dev = devOf(s, A.goal);
+  // un'impronta extra non ancora calibrata pesa meno della frontale
+  const w = main || (off && off.n >= LOCK.learnN) ? 1 : .45;
+  if (dev < LOCK.near) { blendPose(A.goal, s, LOCK.follow * w); A.snap = false; return; }
+  // stima lontana: la accetto solo se confermata da stime recenti coerenti (dopo un recupero del tracciamento ne bastano 2)
+  const need = now - SLAM.okAt < 2500 ? 2 : LOCK.confirm, recent = A.hist.slice(-need);
+  if (recent.length < need) return;
+  const m = meanPose(recent.map(x => x.s));
+  if (spreadOf(recent.map(x => x.s), m) < LOCK.confirmSpread) { A.goal = m; A.snap = true; A.jumps++; }
 }
-function stepMoves(now) { XRS.anchors.forEach(A => { if (!A.move) return; const k = Math.min(1, (now - A.move.t0) / 400), e = ease(k), f = A.move.from, t = A.move.to;
-  A.group.position.lerpVectors(f.p, t.p, e); A.group.quaternion.slerpQuaternions(f.q, t.q, e); A.group.scale.setScalar(f.h + (t.h - f.h) * e); A.group.updateMatrixWorld(true);
-  if (k >= 1) A.move = null; }); }
+// molla smorzata: a ogni fotogramma l'opera si avvicina all'obiettivo, indipendentemente da quante stime arrivano
+let lastStep = 0;
+function stepMoves(now) {
+  const dt = lastStep ? Math.min(.1, (now - lastStep) / 1000) : .016; lastStep = now;
+  XRS.anchors.forEach(A => { if (!A.goal || !IS_MOBILE) return; const G = A.group;
+    const k = 1 - Math.exp(-dt / (A.snap ? LOCK.tauSnap : LOCK.tau));
+    _q.copy(A.goal.q); if (_q.dot(G.quaternion) < 0) _q.set(-_q.x, -_q.y, -_q.z, -_q.w);
+    G.position.lerp(A.goal.p, k); G.quaternion.slerp(_q, k); G.scale.setScalar(G.scale.x + (A.goal.h - G.scale.x) * k); G.updateMatrixWorld(true);
+    if (A.snap && G.position.distanceTo(A.goal.p) / A.goal.h < .01) A.snap = false; });
+}
+function onTracking(d) {
+  const ok = d.status === 'NORMAL', now = performance.now();
+  if (!ok) SLAM.badAt = now; else if (!SLAM.ok) SLAM.okAt = now;
+  SLAM.ok = ok; SLAM.reason = d.reason || ''; diag();
+}
+function diag() {
+  const el = $('diag'); if (!el || !XRS.running) return; const now = performance.now(); let vis = [];
+  XRS.anchors.forEach(A => Object.keys(A.seen).forEach(n => { if (now - A.seen[n] < 400) vis.push(n.split('~')[1] === '0' ? 'frontale' : 'ang. ' + (+n.split('~')[1] + 1)); }));
+  let cal = 0, tot = 0; XRS.anchors.forEach(A => { tot += XRS.targets.filter(t => t.work.id === A.id && !t.name.endsWith('~0')).length; Object.values(A.off).forEach(o => { if (o.n >= LOCK.learnN) cal++; }); });
+  const why = { EXCESSIVE_MOTION: 'movimento troppo veloce', INSUFFICIENT_FEATURES: 'pochi dettagli / poca luce', INSUFFICIENT_LIGHT: 'poca luce', INITIALIZING: 'avvio', RELOCALIZING: 'riallineo' }[SLAM.reason] || SLAM.reason.toLowerCase();
+  el.textContent = 'Punto: ' + (vis.length ? vis.join(' + ') : '—') + ' · Movimento: ' + (SLAM.ok ? 'ok' : why || 'limitato') + (tot ? ' · Angolazioni calibrate ' + cal + '/' + tot : '');
+  el.classList.toggle('bad', !SLAM.ok);
+}
 const mainModule = {
   name: 'murale',
   onStart: () => {
@@ -643,11 +695,12 @@ const mainModule = {
     XRS.anchors.forEach(A => scene.remove(A.group)); XRS.anchors.clear();
     XRS.tmap.clear();
     XRS.works.forEach(w => { const group = new THREE.Group(); group.visible = false; scene.add(group);
-      const A = { id: w.id, work: w, group, samples: 0, buf: [], far: [], locked: false, move: null, reveal: 0, t0: 0, mat: null }; XRS.anchors.set(w.id, A);
-      XRS.targets.filter(t => t.work === w).forEach(t => XRS.tmap.set(t.name, { A, area: t.area })); });
+      const A = { id: w.id, work: w, group, samples: 0, buf: [], hist: [], off: {}, seen: {}, mainAt: -1e9, goal: null, snap: false, jumps: 0, locked: false, reveal: 0, t0: 0, mat: null }; XRS.anchors.set(w.id, A);
+      XRS.targets.filter(t => t.work === w).forEach(t => XRS.tmap.set(t.name, { A, area: t.area, main: t.name.endsWith('~0') })); });
+    Object.assign(SLAM, { ok: true, reason: '', badAt: 0, okAt: 0 }); lastStep = 0;
     XRS.hooks.start && XRS.hooks.start();
   },
-  onUpdate: () => { stepMoves(performance.now()); XRS.hooks.frame && XRS.hooks.frame(); },
+  onUpdate: () => { const now = performance.now(); stepMoves(now); XRS.hooks.frame && XRS.hooks.frame(); if (now - (XRS.diagAt || 0) > 250) { XRS.diagAt = now; diag(); } },
   onCameraStatusChange: ({ status, video }) => {
     if (status === 'requesting') setChip('Consenti la fotocamera…');
     if (status === 'hasVideo') { setChip(XRS.works.length > 1 ? 'Cerco le opere…' : 'Cerco il punto…');
@@ -659,6 +712,7 @@ const mainModule = {
     { event: 'reality.imagefound', process: ({ detail }) => onImage(detail) },
     { event: 'reality.imageupdated', process: ({ detail }) => onImage(detail) },
     { event: 'reality.imagelost', process: ({ detail }) => XRS.hooks.lost && XRS.hooks.lost(detail) },
+    { event: 'reality.trackingstatus', process: ({ detail }) => onTracking(detail) },
   ],
 };
 function xrFail(msg) { const b = XRS.hooks.back; stopXR(); toast(msg, 5000); b ? b() : goHome(); }
@@ -755,7 +809,7 @@ function startView(works, back) {
 $('vOp').oninput = e => { V.op = e.target.value / 100; $('vOpO').textContent = e.target.value + '%'; };
 $('vBlend').onclick = () => setBlend(!V.blend);
 $('vAudio').onclick = () => { V.audio = !V.audio; $('vAudio').setAttribute('aria-pressed', V.audio); V.videos.forEach(v => { v.muted = !V.audio; v.play().catch(() => {}); }); };
-$('vRe').onclick = () => { XRS.anchors.forEach(A => { A.samples = 0; A.buf = []; A.far = []; A.locked = false; A.move = null; A.group.visible = false; A.t0 = 0; A.reveal = 0; }); renderStrip(); $('guide').style.opacity = 1; setChip('Inquadra di nuovo il punto'); };
+$('vRe').onclick = () => { XRS.anchors.forEach(A => { A.samples = 0; A.buf = []; A.hist = []; A.goal = null; A.snap = false; A.locked = false; A.group.visible = false; A.t0 = 0; A.reveal = 0; }); renderStrip(); $('guide').style.opacity = 1; setChip('Inquadra di nuovo il punto'); };
 { const h = $('vHold'); const on = e => { e.preventDefault(); V.hold = true; h.setAttribute('aria-pressed', 'true'); }, off = () => { V.hold = false; h.setAttribute('aria-pressed', 'false'); };
   h.addEventListener('pointerdown', on); ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => h.addEventListener(ev, off)); h.addEventListener('contextmenu', e => e.preventDefault()); }
 $('vShot').onclick = async () => { try { const b64 = await XR8.CanvasScreenshot.takeScreenshot(); const b = await (await fetch('data:image/jpeg;base64,' + b64)).blob(); saveBlob(b, 'murale-ar.jpg'); } catch (e) { toast('Non riesco a salvare la foto'); } };

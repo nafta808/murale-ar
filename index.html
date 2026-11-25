@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Murale AR">
 <title>Murale AR</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=6">
 <script src="config.js"></script>
 <script src="lib/three.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
@@ -131,6 +131,7 @@
     <div class="chip" id="chip" role="status"><i class="dot"></i><span id="chipT">Avvio fotocamera…</span></div>
     <span class="sp"></span>
   </div>
+  <div id="diag" class="diag" aria-live="off"></div>
   <div id="guide" class="guide"><div id="guideStrip" class="strip"></div><p id="guideT">Inquadra uno di questi punti</p></div>
   <div class="bottom">
     <div id="vUI">
@@ -265,6 +266,6 @@
 </section>
 
 <div id="toast" role="status"></div>
-<script src="app.js"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

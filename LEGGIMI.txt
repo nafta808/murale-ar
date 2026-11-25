@@ -1,4 +1,4 @@
-MURALE AR v5 — indirizzo fisso: https://nafta808.github.io/murale-ar/
+MURALE AR v6 — indirizzo fisso: https://nafta808.github.io/murale-ar/
 (il sito si aggiorna da solo a ogni modifica pubblicata su GitHub: non serve più Netlify)
 
 Dal telefono: inquadra il QR (qr-murale-ar.png) -> Safari -> Condividi -> Aggiungi alla schermata Home.
@@ -21,3 +21,13 @@ PUBBLICAZIONE PER ALTRI TELEFONI (facoltativa)
 Inserisci i dati Supabase in config.js (Settings -> API): URL e chiave "anon public", bucket pubblico "opere".
 
 La cartella lib/xr contiene l'8th Wall Engine di Niantic Spatial, distribuito con la sua licenza (lib/xr/LICENSE).
+
+NOVITA' v6 (aggancio fluido)
+- L'opera viene corretta di continuo, in modo morbido, ogni volta che il telefono rivede il punto (prima restava storta finché lo spostamento non superava il 12%).
+- Le angolazioni extra si calibrano da sole sulla frontale mentre ti muovi: niente salti passando da un lato all'altro.
+- Stime sbagliate isolate vengono scartate; dopo un movimento brusco l'opera torna al suo posto in una frazione di secondo.
+- Riga in alto: quale impronta vede il telefono, stato del tracciamento, angolazioni calibrate. Se diventa rossa: troppo veloce o troppo buio.
+CONSIGLI PER I TEST
+- Usa una superficie piatta e ferma (muro, quadro, poster). Uno schermo acceso cambia contenuto e riflette: il riconoscimento fallisce.
+- Buona luce. Al buio la fotocamera sfoca e il tracciamento perde i punti.
+- Parti dalla frontale e spostati con calma la prima volta: e' il momento in cui le angolazioni si calibrano.

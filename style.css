@@ -192,3 +192,7 @@ label.ctl{cursor:pointer}
 .frow .ctl{flex:1 1 auto;min-width:0;padding:10px 8px;border-radius:12px;background:#222;color:#fff;border:1px solid #333;font-size:13px;font-weight:650;text-align:center}
 .frow .ctl[aria-pressed="true"]{border-color:var(--accent);background:#2d1a12}
 .frow .big2{background:var(--accent);border-color:var(--accent)}
+
+/* v6: riga diagnostica del tracciamento */
+.diag{position:absolute;top:calc(64px + var(--st));left:50%;transform:translateX(-50%);max-width:92vw;padding:5px 10px;border-radius:9px;background:rgba(0,0,0,.45);color:#fff;font:600 11px/1.3 -apple-system,sans-serif;text-align:center;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.diag:empty{display:none}.diag.bad{background:rgba(190,40,20,.7)}
