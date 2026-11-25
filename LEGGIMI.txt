@@ -1,0 +1,23 @@
+MURALE AR v5 — indirizzo fisso: https://nafta808.github.io/murale-ar/
+(il sito si aggiorna da solo a ogni modifica pubblicata su GitHub: non serve più Netlify)
+
+Dal telefono: inquadra il QR (qr-murale-ar.png) -> Safari -> Condividi -> Aggiungi alla schermata Home.
+
+CREA
+1. Crea un'opera -> inquadra l'area con un po' di contorno -> Blocca.
+2. Porta i 4 angoli sotto il mirino -> Segna -> Avanti.
+3. Angolazioni: aggiungine 2-3 (sinistra, destra, vicino), segnando di nuovo i 4 angoli.
+   Più angolazioni = l'opera si aggancia anche di lato.
+4. Studio: immagine o video, forma, resa. "Tutto schermo" apre la tela intera:
+   pennello, gomma, annulla/rifai, + Immagine (sposti, ingrandisci, ruoti, poi "Fissa qui").
+5. Prova sul muro / Pubblica.
+
+GUARDA
+Inquadra il punto: dopo circa un secondo compare "Opera fissata" (vibrazione).
+Da lì l'opera è bloccata nello spazio: puoi girarci intorno, uscire e rientrare.
+Se si fosse spostata davvero: "Riaggancia".
+
+PUBBLICAZIONE PER ALTRI TELEFONI (facoltativa)
+Inserisci i dati Supabase in config.js (Settings -> API): URL e chiave "anon public", bucket pubblico "opere".
+
+La cartella lib/xr contiene l'8th Wall Engine di Niantic Spatial, distribuito con la sua licenza (lib/xr/LICENSE).

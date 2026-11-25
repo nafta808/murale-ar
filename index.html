@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0f0e0d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Murale AR">
+<title>Murale AR</title>
+<link rel="stylesheet" href="style.css">
+<script src="config.js"></script>
+<script src="lib/three.min.js"></script>
+<script src="lib/qrcode.min.js"></script>
+<script async src="lib/xr/xr.js" data-preload-chunks="slam"></script>
+</head>
+<body>
+
+<canvas id="xrc" hidden></canvas>
+
+<!-- ============ HOME ============ -->
+<main id="home" class="screen">
+  <div class="home-in">
+    <header class="brand">
+      <span class="kicker">Arte su muri veri</span>
+      <h1>Murale<br>AR</h1>
+    </header>
+
+    <section id="hView" class="card hero" hidden>
+      <p class="eyebrow">Opera <b id="hViewId"></b></p>
+      <h2>Un’opera ti aspetta su questo muro</h2>
+      <p class="mute">Tocca, poi inquadra il punto che vedi nella foto.</p>
+      <img id="hViewThumb" class="hero-thumb" alt="Dove si trova l'opera">
+      <button class="btn primary" id="hViewGo" type="button">Guarda l’opera</button>
+    </section>
+    <p id="hViewErr" class="card mute" hidden></p>
+
+    <section class="card explore">
+      <h2>Guarda le opere</h2>
+      <p class="mute">Apri la fotocamera e inquadra i muri: compaiono tutte le opere salvate e pubblicate, anche più di una insieme.</p>
+      <button class="btn primary" id="hExplore" type="button">Apri la fotocamera</button>
+      <div id="hNearby" class="nearby"></div>
+    </section>
+
+    <section class="card">
+      <h2>Crea un’opera</h2>
+      <ol class="steps">
+        <li><b>Inquadra</b> la superficie (una cornice, un muro, un’insegna) e blocca l’immagine.</li>
+        <li><b>Segna i 4 angoli</b> portandoli sotto il mirino.</li>
+        <li><b>Componi</b> l’opera nell’area e <b>pubblica</b>: ottieni il QR da condividere.</li>
+      </ol>
+      <button class="btn ghost" id="hNew" type="button">Crea un’opera</button>
+    </section>
+
+    <section class="card" id="hProjects">
+      <div class="card-head"><h2>Le tue opere</h2><label class="btn small ghost" for="hImport">Importa</label><input id="hImport" type="file" accept=".json,application/json" hidden></div>
+      <ul id="hList" class="plist"></ul>
+      <p id="hEmpty" class="mute">Nessuna opera ancora.</p>
+    </section>
+
+    <p id="hInstall" class="mute small install" hidden>Per aprirla con un tocco: in Safari tocca <b>Condividi</b> → <b>Aggiungi alla schermata Home</b>.</p>
+    <div id="desk" class="card desk" hidden><canvas id="qr" width="112" height="112"></canvas><p><b>Sei sul computer?</b><br>La fotocamera AR gira sul telefono. Inquadra il codice per aprire questa pagina sull’iPhone.</p></div>
+
+    <footer class="foot">Tracciamento AR: 8th Wall Engine © Niantic Spatial, Inc., distribuito con la sua <a href="lib/xr/LICENSE" target="_blank" rel="noopener">licenza</a>, senza garanzie.</footer>
+  </div>
+</main>
+
+<!-- ============ CATTURA (fotocamera dal vivo) ============ -->
+<section id="capture" hidden>
+  <video id="capVideo" playsinline muted autoplay></video>
+  <div class="cross"></div>
+  <div class="top">
+    <button class="x" id="capBack" type="button" aria-label="Chiudi">✕</button>
+    <div class="chip"><span id="capChipT">Inquadra l’area</span></div>
+    <span class="sp"></span>
+  </div>
+  <div class="bottom">
+    <div>
+      <p class="hint" id="capHint"></p>
+      <div class="row">
+        <label class="ctl" for="capFile">Da galleria</label><input id="capFile" type="file" accept="image/*" hidden>
+        <button class="ctl big" id="capShot" type="button"><span class="ring"></span>Blocca</button>
+        <span class="ctl ghosted" aria-hidden="true"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ANGOLI (mirino su fotogramma bloccato) ============ -->
+<section id="corners" hidden>
+  <canvas id="cnCanvas"></canvas>
+  <img id="cnRef" class="cnref" alt="Area da ritrovare" hidden>
+  <div class="top">
+    <button class="x" id="cnBack" type="button" aria-label="Rifai foto">↺</button>
+    <div class="chip" id="cnChip"><span id="cnChipT">Angolo 1 di 4</span></div>
+    <span class="sp"></span>
+  </div>
+  <div class="bottom">
+    <div>
+      <p class="hint" id="cnHint">Trascina la foto finché l’angolo è sotto il mirino. Due dita per ingrandire.</p>
+      <div class="row">
+        <button class="ctl" id="cnUndo" type="button" disabled>Annulla</button>
+        <button class="ctl big" id="cnMark" type="button"><span class="ring"></span>Segna</button>
+        <button class="ctl" id="cnDone" type="button" disabled>Avanti</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ANGOLAZIONI ============ -->
+<section id="angles" class="screen" hidden>
+  <div class="bar-top"><button class="x" data-home type="button" aria-label="Home">←</button><b>Angolazioni</b><span class="dims" id="aCount"></span></div>
+  <div class="pub">
+    <p>Fotografa la stessa area da altre posizioni e segna di nuovo i 4 angoli. Così il telefono la riconosce anche di lato e l’opera resta ferma mentre giri intorno.</p>
+    <div id="aList" class="angs"></div>
+    <p class="mute" id="aTip"></p>
+    <div class="row2">
+      <button class="btn primary" id="aAdd" type="button">Aggiungi angolazione</button>
+      <button class="btn ghost" id="aGo" type="button">Vai allo Studio</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ AR (Guarda) ============ -->
+<div id="ar" hidden>
+  <div class="top">
+    <button class="x" id="arBack" type="button" aria-label="Chiudi">✕</button>
+    <div class="chip" id="chip" role="status"><i class="dot"></i><span id="chipT">Avvio fotocamera…</span></div>
+    <span class="sp"></span>
+  </div>
+  <div id="guide" class="guide"><div id="guideStrip" class="strip"></div><p id="guideT">Inquadra uno di questi punti</p></div>
+  <div class="bottom">
+    <div id="vUI">
+      <label class="slider"><span>Opacità</span><input id="vOp" type="range" min="0" max="100" value="100"><output id="vOpO">100%</output></label>
+      <div class="row">
+        <button class="ctl" id="vHold" type="button">Prima</button>
+        <button class="ctl" id="vBlend" type="button" aria-pressed="false">Vernice</button>
+        <button class="ctl" id="vRe" type="button">Riaggancia</button>
+        <button class="ctl" id="vAudio" type="button" aria-pressed="false" hidden>Audio</button>
+        <button class="ctl shot" id="vShot" type="button">Foto</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ STUDIO ============ -->
+<section id="studio" class="screen" hidden>
+  <div class="bar-top"><button class="x" id="sBack" type="button" aria-label="Indietro">←</button><b>Studio</b><span class="dims" id="sDims"></span><button class="btn small primary" data-full type="button">Tutto schermo</button></div>
+  <div class="studio-body">
+    <div class="stage-wrap" id="sWrap"><canvas id="sCanvas"></canvas></div>
+    <div class="tools">
+      <div class="seg" role="tablist">
+        <button type="button" class="on" data-tab="opera">Opera</button>
+        <button type="button" data-tab="disegno">Disegno</button>
+        <button type="button" data-tab="forma">Forma</button>
+        <button type="button" data-tab="resa">Resa</button>
+        <button type="button" data-tab="area">Area</button>
+      </div>
+
+      <div class="tab" data-pane="opera">
+        <div class="row2">
+          <label class="btn ghost" for="sFile">Immagine</label><input id="sFile" type="file" accept="image/*" hidden>
+          <label class="btn ghost" for="sVideo">Video</label><input id="sVideo" type="file" accept="video/*" hidden>
+          <button class="btn ghost" id="sClearArt" type="button">Togli</button>
+        </div>
+        <div class="seg small" id="sFit">
+          <button type="button" data-fit="cover" class="on">Riempi</button>
+          <button type="button" data-fit="contain">Contieni</button>
+          <button type="button" data-fit="stretch">Deforma</button>
+        </div>
+        <label class="slider"><span>Zoom</span><input id="sZoom" type="range" min="50" max="300" value="100"><output id="sZoomO">100%</output></label>
+        <p class="mute small">Trascina sull’area per spostare l’immagine.</p>
+      </div>
+
+      <div class="tab" data-pane="disegno" hidden>
+        <div class="swatches" id="sSw"></div>
+        <label class="slider"><span>Pennello</span><input id="sSize" type="range" min="2" max="120" value="18"><output id="sSizeO">18</output></label>
+        <div class="row2">
+          <button class="btn ghost" id="sEraser" type="button" aria-pressed="false">Gomma</button>
+          <button class="btn ghost" id="sClearDraw" type="button">Cancella disegno</button>
+        </div>
+        <button class="btn primary" data-full type="button">Disegna a tutto schermo</button>
+      </div>
+
+      <div class="tab" data-pane="forma" hidden>
+        <div class="shapes" id="sShapes"></div>
+        <div id="sFreeUI" class="row2" hidden>
+          <button class="btn ghost" id="sFreeUndo" type="button">Togli punto</button>
+          <button class="btn ghost" id="sFreeClear" type="button">Ricomincia</button>
+        </div>
+        <p class="mute small" id="sShapeHint">La forma ritaglia l’opera. Con “Libera” tocchi la tela per disegnarne i contorni.</p>
+        <label class="slider"><span>Oltre gli angoli</span><input id="sExt" type="range" min="0" max="60" value="0"><output id="sExtO">0%</output></label>
+      </div>
+
+      <div class="tab" data-pane="resa" hidden>
+        <label class="slider"><span>Opacità</span><input id="sOp" type="range" min="10" max="100" value="100"><output id="sOpO">100%</output></label>
+        <label class="slider"><span>Bordo sfumato</span><input id="sFeather" type="range" min="0" max="25" value="1"><output id="sFeatherO">1%</output></label>
+        <div class="row2">
+          <button class="btn ghost" id="sBlend" type="button" aria-pressed="false">Effetto vernice</button>
+          <button class="btn ghost" id="sWall" type="button" aria-pressed="true">Mostra muro</button>
+        </div>
+      </div>
+
+      <div class="tab" data-pane="area" hidden>
+        <label class="slider"><span>Proporzioni</span><input id="sAspect" type="range" min="-60" max="60" value="0"><output id="sAspectO">auto</output></label>
+        <p class="mute small">Calcolate dalla prospettiva. Se l’area sembra schiacciata o allungata, correggi qui.</p>
+        <div class="row2"><button class="btn ghost" id="sRedo" type="button">Rifai gli angoli</button><button class="btn ghost" id="sAngles" type="button">Angolazioni</button></div>
+      </div>
+
+      <div class="row2 end">
+        <button class="btn ghost" id="sTry" type="button">Prova sul muro</button>
+        <button class="btn primary" id="sPublish" type="button">Pubblica</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PUBBLICATA ============ -->
+<section id="publish" class="screen" hidden>
+  <div class="bar-top"><button class="x" data-home type="button" aria-label="Home">←</button><b>Opera <span id="pId"></span></b><span class="sp"></span></div>
+  <div class="pub">
+    <div class="qrcard"><canvas id="pQr"></canvas><p class="mute small" id="pUrl"></p></div>
+    <p id="pState"></p>
+    <p id="pQuality" class="quality" hidden></p>
+    <div class="row2">
+      <button class="btn primary" id="pShare" type="button">Condividi link</button>
+      <button class="btn ghost" id="pSaveQr" type="button">Scarica QR</button>
+    </div>
+    <div class="row2">
+      <button class="btn ghost" id="pView" type="button">Guarda sul muro</button>
+      <button class="btn ghost" id="pExport" type="button">Esporta file</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TELA INTERA ============ -->
+<section id="full" hidden>
+  <div class="ftop">
+    <button class="x" id="fDone" type="button" aria-label="Fine">✓</button>
+    <div class="fgrp"><button class="ic" id="fUndo" type="button" aria-label="Annulla">↶</button><button class="ic" id="fRedo" type="button" aria-label="Rifai">↷</button></div>
+    <div class="fgrp"><button class="ic" id="fWall" type="button" aria-pressed="true" title="Muro sotto">▦</button><button class="ic" id="fFit" type="button" title="Adatta">⤢</button></div>
+  </div>
+  <div id="fStage"><canvas id="fCanvas"></canvas></div>
+  <div class="fbot">
+    <div id="fTools">
+      <div class="swatches" id="fSw"></div>
+      <label class="slider"><span>Pennello</span><input id="fSize" type="range" min="1" max="160" value="18"><output id="fSizeO">18</output></label>
+      <div class="frow">
+        <button class="ctl" id="fPen" type="button">Pennello</button>
+        <button class="ctl" id="fEraser" type="button">Gomma</button>
+        <button class="ctl" id="fMove" type="button">Sposta vista</button>
+        <label class="ctl" for="fImg">+ Immagine</label><input id="fImg" type="file" accept="image/*" hidden>
+        <button class="ctl" id="fClear" type="button">Pulisci</button>
+      </div>
+      <p class="mute small">Un dito disegna · due dita ingrandiscono la tela</p>
+    </div>
+    <div id="fStk" hidden>
+      <p class="small">Sposta con un dito, due dita per ingrandire e ruotare.</p>
+      <div class="frow"><button class="ctl" id="fStkNo" type="button">Togli</button><button class="ctl big2" id="fStkOk" type="button">Fissa qui</button></div>
+    </div>
+  </div>
+</section>
+
+<div id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>
